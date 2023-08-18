@@ -1,0 +1,9 @@
+---
+# khulnasoft - Declarative CLI Version Manager
+# https://khulnasoftproj.github.io/
+registries:
+- type: standard
+  ref: v0.12.2 # renovate: depName=khulnasoftproj/khulnasoft-registry
+
+packages:
+- name: sulaiman-coder/github-comment@v4.1.0

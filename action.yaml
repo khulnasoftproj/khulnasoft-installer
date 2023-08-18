@@ -1,0 +1,150 @@
+name: Install khulnasoft
+description: Install khulnasoft https://khulnasoftproj.github.io/ and install tools with khulnasoft
+inputs:
+  khulnasoft_version:
+    description: installed khulnasoft's version (e.g. v0.8.7)
+    required: true
+  enable_khulnasoft_install:
+    required: false
+    default: "true"
+  khulnasoft_opts:
+    required: false
+    default: "-l"
+  policy_allow:
+    required: false
+    description: |
+      khulnasoft >= v2.3.0
+      If this isn't empty, "khulnasoft policy allow" is run.
+      If this is "true", "khulnasoft policy allow" is run without argument.
+      If this isn't empty and isn't "true", "khulnasoft policy allow <inputs.policy_allow>" is run.
+
+  working_directory:
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - run: |
+        echo "::error ::khulnasoft_version is required. https://github.com/khulnasoftproj/khulnasoft-installer"
+        exit 1
+      shell: bash
+      if: inputs.khulnasoft_version == ''
+
+    - run: echo "${KHULNASOFT_ROOT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/khulnasoftproj-khulnasoft}/bin" >> $GITHUB_PATH
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      if: inputs.enable_khulnasoft_install == 'true' && runner.os != 'Windows'
+
+    - run: |
+        echo "${KHULNASOFT_ROOT_DIR:-$HOME/AppData/Local/khulnasoftproj-khulnasoft}/bin" >> $GITHUB_PATH
+        echo "${KHULNASOFT_ROOT_DIR:-$HOME/AppData/Local/khulnasoftproj-khulnasoft}/bat" >> $GITHUB_PATH
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      if: inputs.enable_khulnasoft_install == 'true' && runner.os == 'Windows'
+
+    - run: |
+        $(if($env:KHULNASOFT_ROOT_DIR) {echo $env:KHULNASOFT_ROOT_DIR} else {echo "$HOME/AppData/Local/khulnasoftproj-khulnasoft/bin"}) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        $(if($env:KHULNASOFT_ROOT_DIR) {echo $env:KHULNASOFT_ROOT_DIR} else {echo "$HOME/AppData/Local/khulnasoftproj-khulnasoft/bat"}) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      shell: pwsh
+      working-directory: ${{ inputs.working_directory }}
+      if: inputs.enable_khulnasoft_install == 'true' && runner.os == 'Windows'
+
+    # Copy khulnasoft-installer in action.
+    # https://github.com/khulnasoftproj/khulnasoft-installer/issues/461
+    # https://github.com/actions/runner/issues/2185
+    - run: |
+        set -eu
+        set -o pipefail
+
+        uname_os() {
+          local os
+          os=$(uname -s | tr '[:upper:]' '[:lower:]')
+          case "$os" in
+            cygwin_nt*) os="windows" ;;
+            mingw*) os="windows" ;;
+            msys_nt*) os="windows" ;;
+          esac
+          echo "$os"
+        }
+
+        uname_arch() {
+          local arch
+          arch=$(uname -m)
+          case $arch in
+            x86_64) arch="amd64" ;;
+            aarch64) arch="arm64" ;;
+          esac
+          echo ${arch}
+        }
+
+        OS="$(uname_os)"
+        ARCH="$(uname_arch)"
+
+        install_path=${KHULNASOFT_ROOT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/khulnasoftproj-khulnasoft}/bin/khulnasoft
+        if [ "$OS" = windows ]; then
+          install_path=${KHULNASOFT_ROOT_DIR:-$HOME/AppData/Local/khulnasoftproj-khulnasoft}/bin/khulnasoft.exe
+        fi
+
+        bootstrap_version=v2.9.0
+        checksums="092604196ad84e8dc41580c17651fcb8e6ba1adfd95a677538b52911d72c4462  khulnasoft_darwin_arm64.tar.gz
+        47144afbbd20d000dcc6b149e2cd5a5ad061e17b760be716e2188137d2103fe8  khulnasoft_windows_arm64.tar.gz
+        77400615132f827cccdcbde071b693bba99bc730c3d01b298dd1dab66a56d0f0  khulnasoft_linux_amd64.tar.gz
+        a8e5ad937c9e4c07fd7744d6b0de7455af3e85078daa7ec6b0eb7999cbcd2e1f  khulnasoft_windows_amd64.tar.gz
+        cd24d8c4463f001f281702d0684ecdbe4f2e8bacfe5c43426fb0e291ef692f17  khulnasoft_linux_arm64.tar.gz
+        ffc94168187970837c00409f0c94bd7fd363f34b7e88acf1724296931b609d35  khulnasoft_darwin_amd64.tar.gz"
+
+        filename=khulnasoft_${OS}_${ARCH}.tar.gz
+        URL=https://github.com/khulnasoftproj/khulnasoft/releases/download/$bootstrap_version/$filename
+
+        tempdir=$(mktemp -d)
+        echo "===> Installing khulnasoft $bootstrap_version for bootstrapping..." >&2
+        echo "===> Downloading $URL ..." >&2
+        curl --fail -L "$URL" -o "$tempdir/$filename"
+
+        cd "$tempdir"
+
+        echo "===> Verifying checksum of khulnasoft $bootstrap_version ..." >&2
+        if command -v sha256sum > /dev/null 2>&1; then
+          echo "$checksums" | grep "$filename" | sha256sum -c
+        elif command -v shasum > /dev/null 2>&1; then
+          echo "$checksums" | grep "$filename" | shasum -a 256 -c
+        else
+          echo "Skipped checksum verification of khulnasoft $bootstrap_version, because both sha256sum and shasum aren't found" >&2
+        fi
+
+        tar xvzf "$filename" > /dev/null
+        chmod a+x khulnasoft
+        if [ -n "${KHULNASOFT_VERSION:-}" ]; then
+          echo "===> $tempdir/khulnasoft update-khulnasoft $KHULNASOFT_VERSION" >&2
+          ./khulnasoft update-khulnasoft "$KHULNASOFT_VERSION"
+        else
+          echo "===> $tempdir/khulnasoft update-khulnasoft" >&2
+          ./khulnasoft update-khulnasoft
+        fi
+
+        "$install_path" -v
+
+        rm -R "$tempdir"
+      working-directory: ${{ inputs.working_directory }}
+      shell: bash
+      env:
+        KHULNASOFT_VERSION: ${{ inputs.khulnasoft_version }}
+
+    - run: khulnasoft policy allow
+      working-directory: ${{ inputs.working_directory }}
+      if: inputs.policy_allow == 'true'
+      shell: bash
+
+    - run: khulnasoft policy allow "$POLICY_FILE"
+      working-directory: ${{ inputs.working_directory }}
+      if: |
+        inputs.policy_allow != 'true' && inputs.policy_allow != ''
+      shell: bash
+      env:
+        POLICY_FILE: ${{ inputs.policy_allow }}
+
+    - run: khulnasoft i $KHULNASOFT_OPTS
+      working-directory: ${{ inputs.working_directory }}
+      shell: bash
+      env:
+        KHULNASOFT_OPTS: ${{ inputs.khulnasoft_opts }}

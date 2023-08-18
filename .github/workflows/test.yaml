@@ -1,0 +1,221 @@
+---
+name: test
+on:
+  pull_request: {}
+permissions: {}
+jobs:
+  path-filter:
+    # Get changed files to filter jobs
+    outputs:
+      update-khulnasoft-checksums: ${{steps.changes.outputs.update-khulnasoft-checksums}}
+      renovate-config-validator: ${{steps.changes.outputs.renovate-config-validator}}
+      ghalint: ${{steps.changes.outputs.ghalint}}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read # To get pull requests of private repository
+    steps:
+      - uses: dorny/paths-filter@4512585405083f25c027a35db413c2b3b9006d50 # v2.11.1
+        id: changes
+        with:
+          filters: |
+            update-khulnasoft-checksums:
+              - khulnasoft.yaml
+              - khulnasoft/*.yaml
+              - khulnasoft-checksums.json
+            renovate-config-validator:
+              - renovate.json5
+            ghalint:
+              - .github/workflows/*.yaml
+              - khulnasoft/ghalint.yaml
+
+  status-check:
+    # This job is used for main branch's branch protection rule's status check.
+    # If all dependent jobs succeed or are skipped this job succeeds.
+    runs-on: ubuntu-latest
+    needs:
+      - update-khulnasoft-checksums
+      - renovate-config-validator
+      - ghalint
+      - test-script
+      - test-script-set-version
+      - test-action-linux
+      - test-action-macos
+      - test-action-windows-normal
+      - test-action-windows-working_dir
+    permissions: {}
+    if: |
+      ! failure() && ! cancelled() && github.event.pull_request.user.login == 'renovate[bot]' && contains(github.event.pull_request.body, ' **Automerge**: Enabled.')
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: tibdex/github-app-token@b62528385c34dbc9f38e5f4225ac829252d1ea92 # v1.8.0
+        with:
+          app_id: ${{secrets.APP_ID}}
+          private_key: ${{secrets.APP_PRIVATE_KEY}}
+      - run: gh -R "$GITHUB_REPOSITORY" pr merge --squash --auto --delete-branch "$PR_NUMBER"
+        env:
+          GITHUB_TOKEN: ${{steps.generate_token.outputs.token}} # Use GitHub App to trigger GitHub Actions Workflow by merge commit.
+          PR_NUMBER: ${{github.event.pull_request.number}}
+
+  update-khulnasoft-checksums:
+    # Update khulnasoft-checksums.json and push a commit
+    needs: path-filter
+    if: needs.path-filter.outputs.update-khulnasoft-checksums == 'true'
+    permissions:
+      contents: read # To checkout private repository
+    uses: khulnasoftproj/update-checksum-workflow/.github/workflows/update-checksum.yaml@01a3dfca0b401e2fa1ff11f2b840d227806deca1 # v0.1.7
+    with:
+      khulnasoft_version: v2.10.1
+      prune: true
+    secrets:
+      gh_app_id: ${{secrets.APP_ID}}
+      gh_app_private_key: ${{secrets.APP_PRIVATE_KEY}}
+
+  renovate-config-validator:
+    # Validate Renovate Configuration by renovate-config-validator.
+    uses: sulaiman-coder/renovate-config-validator-workflow/.github/workflows/validate.yaml@35f1c78014c423fd37eb792c73f11ec0898098f4 # v0.2.2
+    needs: path-filter
+    if: needs.path-filter.outputs.renovate-config-validator == 'true'
+    permissions:
+      contents: read
+
+  ghalint:
+    # Validate GitHub Actions Workflows by ghalint.
+    needs: path-filter
+    if: needs.path-filter.outputs.ghalint == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: khulnasoftproj/khulnasoft-installer@36dc5833b04eb63f06e3bb818aa6b7a6e6db99a9 # v2.1.2
+        with:
+          khulnasoft_version: v2.10.1
+        env:
+          KHULNASOFT_GITHUB_TOKEN: ${{github.token}}
+      - run: ghalint run
+        env:
+          GHALINT_LOG_COLOR: always
+
+  test-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - run: cat khulnasoft-installer | bash
+      - run: echo "${KHULNASOFT_ROOT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/khulnasoftproj-khulnasoft}/bin" >> "$GITHUB_PATH"
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+
+  test-script-set-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - run: cat khulnasoft-installer | bash -s -- -v v2.0.0
+      - run: echo "${KHULNASOFT_ROOT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/khulnasoftproj-khulnasoft}/bin" >> "$GITHUB_PATH"
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+
+  test-action-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: ./
+        with:
+          khulnasoft_version: v2.10.1
+          working_directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+      - run: github-comment -v
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  test-action-container:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.21.0
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: ./
+        with:
+          khulnasoft_version: v2.10.1
+          working_directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+      - run: github-comment -v
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  test-action-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: ./
+        with:
+          khulnasoft_version: v2.10.1
+          working_directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+      - run: github-comment -v
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  test-action-windows-normal:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: ./
+        with:
+          khulnasoft_version: v2.10.1
+      - run: command -v khulnasoft
+        shell: bash
+      - run: khulnasoft -v
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: actionlint -version
+        shell: bash
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+      - run: actionlint -version
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  test-action-windows-working_dir:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: ./
+        with:
+          khulnasoft_version: v2.10.1
+          working_directory: tests
+
+      - run: command -v khulnasoft
+        shell: bash
+      - run: khulnasoft -v
+        shell: bash
+      - run: github-comment -v
+        shell: bash
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - run: command -v khulnasoft
+      - run: khulnasoft -v
+      - run: github-comment -v
+        working-directory: tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

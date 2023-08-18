@@ -1,0 +1,31 @@
+{
+  extends: [
+    "config:base",
+    "helpers:pinGitHubActionDigests",
+    "github>khulnasoftproj/khulnasoft-renovate-config#1.8.0",
+    "github>khulnasoftproj/khulnasoft-renovate-config:installer-script#1.8.0(README\\.md)",
+  ],
+  automerge: true,
+  major: {
+    automerge: false,
+  },
+  regexManagers: [
+    {
+      fileMatch: ["README.md"],
+      depNameTemplate: "khulnasoftproj/khulnasoft-installer",
+      datasourceTemplate: "github-releases",
+      matchStrings: [
+        "khulnasoft-installer@(?<currentValue>.*)",
+      ],
+    },
+    {
+      fileMatch: ["README.md"],
+      depNameTemplate: "khulnasoftproj/khulnasoft",
+      datasourceTemplate: "github-releases",
+      matchStrings: [
+        "khulnasoft_version: (?<currentValue>.*?)\\n",
+        "bash -s -- -v (?<currentValue>.*) -i",
+      ],
+    },
+  ],
+}
