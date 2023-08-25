@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v3 # v3.5.3
       - uses: khulnasoftproj/khulnasoft-installer@v2.1.2 # v2.1.2
         with:
-          khulnasoft_version: v2.10.1
+          khulnasoft_version: v2.9.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
       - run: actionlint -ignore 'Useless cat'
